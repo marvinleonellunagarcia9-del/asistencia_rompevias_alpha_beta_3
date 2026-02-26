@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Control de Asistencia</title>
+    <title>Control de Asistencia PRO</title>
     
     <!-- Tailwind CSS para el diseño -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,15 +12,22 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
-    <!-- Babel para compilar JSX en el navegador -->
+    <!-- Babel para compilar JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+    <!-- Librería para el escáner de Códigos QR -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
     <style>
-        /* Ajustes para dispositivos móviles */
         body { -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
         @supports (padding-bottom: env(safe-area-inset-bottom)) {
           .pb-safe { padding-bottom: calc(0.5rem + env(safe-area-inset-bottom)); }
         }
+        /* Ajustes para el escáner QR para que se vea bien en móviles */
+        #qr-reader { width: 100%; max-width: 500px; margin: 0 auto; border-radius: 12px; overflow: hidden; border: none !important; }
+        #qr-reader__scan_region { background: black; }
+        #qr-reader button { background: #2563eb; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold; margin: 5px; cursor: pointer; border: none; }
+        #qr-reader a { color: #2563eb; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900 font-sans">
@@ -31,13 +38,27 @@
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
-        // --- LECTURA DE CONFIGURACIÓN DE NUBE (Desde la app) ---
+        // ============================================================================
+        // ⚠️ PEGA AQUÍ TU CONFIGURACIÓN DE FIREBASE PARA QUE FUNCIONE EN TODOS LADOS ⚠️
+        // Reemplaza el "null" por las llaves de tu proyecto. Ejemplo:
+        // let MI_PROPIA_BASE_DE_DATOS = { apiKey: "AIza...", projectId: "mi-app", ... };
+        // ============================================================================
+        let MI_PROPIA_BASE_DE_DATOS = {
+            apiKey: "AIzaSyDJMcdlz1nlUcCynonikWnvQMIPQEVvp2Y",
+            authDomain: "asistencia-d5169.firebaseapp.com",
+            projectId: "asistencia-d5169",
+            storageBucket: "asistencia-d5169.firebasestorage.app",
+            messagingSenderId: "231825021032",
+            appId: "1:231825021032:web:e39fad074e1f7e4454c3dd",
+            measurementId: "G-NP5Z250FVS"
+        }; 
+
+        // Respaldo por si habían guardado la config desde la web anterior
         const savedConfigStr = localStorage.getItem('custom_firebase_config');
-        let MI_PROPIA_BASE_DE_DATOS = null;
-        if (savedConfigStr) {
-            try { MI_PROPIA_BASE_DE_DATOS = JSON.parse(savedConfigStr); } catch(e) {}
+        if (!MI_PROPIA_BASE_DE_DATOS && savedConfigStr) { 
+            try { MI_PROPIA_BASE_DE_DATOS = JSON.parse(savedConfigStr); } catch(e) {} 
         }
 
         let app, auth, db, appId;
@@ -54,9 +75,7 @@
                 db = getFirestore(app);
                 appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
             }
-        } catch (error) {
-            console.error("No hay nube disponible, operando en modo local.");
-        }
+        } catch (error) { console.error("No hay nube disponible, operando en modo local."); }
 
         // --- ICONOS SVG ---
         const IconUsers = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>;
@@ -64,18 +83,19 @@
         const IconCheckSquare = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>;
         const IconFileText = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg>;
         const IconCloud = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path></svg>;
+        const IconUploadCloud = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path><polyline points="16 16 12 12 8 16"></polyline></svg>;
         const IconPlus = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>;
         const IconTrash2 = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg>;
         const IconCheckCircle = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>;
         const IconXCircle = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"></circle><line x1="15" x2="9" y1="9" y2="15"></line><line x1="9" x2="15" y1="9" y2="15"></line></svg>;
         const IconAlertCircle = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line></svg>;
         const IconUser = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>;
+        const IconQrCode = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><path d="M7 7h.01"></path><path d="M18 7h.01"></path><path d="M18 18h.01"></path><path d="M7 18h.01"></path></svg>;
+        const IconNfc = ({size=24, className=""}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M4 8v8"></path><path d="M8 6v12"></path><path d="M12 4v16"></path><path d="M16 6v12"></path><path d="M20 8v8"></path></svg>;
 
         function App() {
-            // --- ESTADOS (Híbrido: LocalStorage por defecto, Firebase si hay conexión) ---
+            // --- ESTADOS ---
             const [user, setUser] = useState(null);
-            
-            // Inicializar con LocalStorage para que la app funcione inmediatamente
             const [users, setUsers] = useState(() => JSON.parse(localStorage.getItem('local_users')) || []);
             const [activities, setActivities] = useState(() => JSON.parse(localStorage.getItem('local_activities')) || []);
             const [attendance, setAttendance] = useState(() => JSON.parse(localStorage.getItem('local_attendance')) || {});
@@ -86,40 +106,36 @@
             const [activeTab, setActiveTab] = useState('users');
             const [notification, setNotification] = useState(null);
 
-            // Estado de la configuración de la nube
-            const [configInput, setConfigInput] = useState(() => {
-                const saved = localStorage.getItem('custom_firebase_config');
-                return saved ? JSON.stringify(JSON.parse(saved), null, 2) : '';
-            });
+            // Estados del Escáner QR / NFC
+            const [scannerActive, setScannerActive] = useState(false);
+            const [nfcSupported, setNfcSupported] = useState('NDEFReader' in window);
+            const [qrModalUser, setQrModalUser] = useState(null);
+            
+            const lastScanRef = useRef({ data: null, time: 0 });
 
-            // --- FORMULARIOS ---
-            const [userForm, setUserForm] = useState({ fullName: '', age: '', idNumber: '', address: '', phone: '', email: '', photo: null });
+            // Formulario de Usuario
+            const [userForm, setUserForm] = useState({ fullName: '', age: '', idNumber: '', address: '', phone: '', email: '', photo: null, nfcId: '' });
             const [activityForm, setActivityForm] = useState({ name: '', date: '' });
             const [selectedActivityForAttendance, setSelectedActivityForAttendance] = useState('');
             const [selectedActivityForReport, setSelectedActivityForReport] = useState('');
 
-            // Sincronización LocalStorage constante si estamos offline
+            // Verificar si hay datos locales atrapados
+            const localU = JSON.parse(localStorage.getItem('local_users')) || [];
+            const hasLocalDataToSync = localU.length > 0;
+
+            // --- SINCRONIZACIÓN LOCAL ---
             useEffect(() => { if (!isOnline) localStorage.setItem('local_users', JSON.stringify(users)); }, [users, isOnline]);
             useEffect(() => { if (!isOnline) localStorage.setItem('local_activities', JSON.stringify(activities)); }, [activities, isOnline]);
             useEffect(() => { if (!isOnline) localStorage.setItem('local_attendance', JSON.stringify(attendance)); }, [attendance, isOnline]);
 
             // --- FIREBASE EFECTOS ---
             useEffect(() => {
-                if (!auth) {
-                    setLoadingDb(false);
-                    return;
-                }
+                if (!auth) { setLoadingDb(false); return; }
                 const initAuth = async () => {
                     try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await signInWithCustomToken(auth, __initial_auth_token);
-                        } else {
-                            await signInAnonymously(auth);
-                        }
-                    } catch (err) {
-                        console.error("Error de Autenticación:", err);
-                        showNotification('Asegúrate de habilitar Autenticación Anónima en Firebase', 'error');
-                    }
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) { await signInWithCustomToken(auth, __initial_auth_token); } 
+                        else { await signInAnonymously(auth); }
+                    } catch (err) { console.error("Error Auth:", err); }
                 };
                 initAuth();
                 const unsubscribe = onAuthStateChanged(auth, setUser);
@@ -130,20 +146,16 @@
                 if (!user || !db) return;
                 setIsOnline(true);
                 
-                const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
-                const activitiesRef = collection(db, 'artifacts', appId, 'public', 'data', 'activities');
-                const attendanceRef = collection(db, 'artifacts', appId, 'public', 'data', 'attendance');
-
-                const unsubUsers = onSnapshot(usersRef, (snap) => {
+                const unsubUsers = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snap) => {
                     setUsers(snap.docs.map(d => ({ ...d.data(), id: d.id })));
                     setLoadingDb(false);
                 }, console.error);
 
-                const unsubActivities = onSnapshot(activitiesRef, (snap) => {
+                const unsubActivities = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'activities'), (snap) => {
                     setActivities(snap.docs.map(d => ({ ...d.data(), id: d.id })));
                 }, console.error);
 
-                const unsubAttendance = onSnapshot(attendanceRef, (snap) => {
+                const unsubAttendance = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'attendance'), (snap) => {
                     const attData = {};
                     snap.docs.forEach(d => { attData[d.id] = d.data(); });
                     setAttendance(attData);
@@ -151,6 +163,16 @@
 
                 return () => { unsubUsers(); unsubActivities(); unsubAttendance(); };
             }, [user]);
+
+            // --- ESCÁNER QR EFFECT ---
+            useEffect(() => {
+                let html5QrcodeScanner;
+                if (scannerActive && document.getElementById("qr-reader")) {
+                    html5QrcodeScanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
+                    html5QrcodeScanner.render((decodedText) => processScannedData(decodedText), () => {});
+                }
+                return () => { if (html5QrcodeScanner) html5QrcodeScanner.clear().catch(e => console.error(e)); };
+            }, [scannerActive]); 
 
             // --- FUNCIONES AUXILIARES ---
             const showNotification = (msg, type = 'success') => {
@@ -160,132 +182,156 @@
 
             const generateId = () => Math.random().toString(36).substr(2, 9);
 
+            // MIGRAR DATOS LOCALES A LA NUBE
+            const syncLocalToCloud = async () => {
+                if (!isOnline || !db) return;
+                if (confirm("¿Estás seguro que deseas subir todos los datos que guardaste en esta computadora a la nube de Firebase?")) {
+                    try {
+                        const lUsers = JSON.parse(localStorage.getItem('local_users')) || [];
+                        const lActivities = JSON.parse(localStorage.getItem('local_activities')) || [];
+                        const lAttendance = JSON.parse(localStorage.getItem('local_attendance')) || {};
+
+                        for (const u of lUsers) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', u.id), u);
+                        for (const a of lActivities) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activities', a.id), a);
+                        for (const [actId, attObj] of Object.entries(lAttendance)) {
+                            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendance', actId), attObj, { merge: true });
+                        }
+
+                        // Limpiar local storage para que ya no pida subir
+                        localStorage.removeItem('local_users');
+                        localStorage.removeItem('local_activities');
+                        localStorage.removeItem('local_attendance');
+                        showNotification("¡Datos migrados exitosamente a la nube!", "success");
+                    } catch (error) {
+                        showNotification("Hubo un error al subir los datos.", "error");
+                    }
+                }
+            };
+
+            // --- LÓGICA DE ESCANEO (QR y NFC) ---
+            const processScannedData = async (scannedData) => {
+                if (lastScanRef.current.data === scannedData && (Date.now() - lastScanRef.current.time < 3000)) return;
+                lastScanRef.current = { data: scannedData, time: Date.now() };
+
+                const foundUser = users.find(u => u.id === scannedData || u.nfcId === scannedData);
+
+                if (foundUser) {
+                    if (!selectedActivityForAttendance) return showNotification('Selecciona una actividad primero', 'error');
+                    
+                    const isAlreadyPresent = attendance[selectedActivityForAttendance]?.[foundUser.id] || false;
+                    
+                    if (!isAlreadyPresent) {
+                        if (isOnline && db) {
+                            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendance', selectedActivityForAttendance), { [foundUser.id]: true }, { merge: true });
+                        } else {
+                            setAttendance(prev => ({ ...prev, [selectedActivityForAttendance]: { ...(prev[selectedActivityForAttendance] || {}), [foundUser.id]: true } }));
+                        }
+                        showNotification(`¡Asistencia de ${foundUser.fullName} registrada!`, 'success');
+                        
+                        try {
+                            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            const oscillator = audioCtx.createOscillator();
+                            const gainNode = audioCtx.createGain();
+                            oscillator.connect(gainNode);
+                            gainNode.connect(audioCtx.destination);
+                            oscillator.type = 'sine';
+                            oscillator.frequency.value = 800;
+                            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+                            gainNode.gain.linearRampToValueAtTime(1, audioCtx.currentTime + 0.05);
+                            gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.2);
+                            oscillator.start(audioCtx.currentTime);
+                            oscillator.stop(audioCtx.currentTime + 0.2);
+                        } catch(e) {}
+                    } else {
+                        showNotification(`${foundUser.fullName} ya estaba marcado presente.`, 'success');
+                    }
+                } else {
+                    showNotification('Código o Tarjeta no registrados en el sistema', 'error');
+                }
+            };
+
+            const startNfcScanner = async () => {
+                if (!nfcSupported) return showNotification('NFC no soportado en este dispositivo (Usa Android/Chrome)', 'error');
+                try {
+                    const ndef = new NDEFReader();
+                    await ndef.scan();
+                    showNotification("Acerca la tarjeta RFID/NFC al celular...", "success");
+                    ndef.onreading = event => processScannedData(event.serialNumber);
+                } catch (error) { showNotification("Error activando NFC. Revisa permisos.", "error"); }
+            };
+
+            const readNfcForForm = async (e) => {
+                e.preventDefault();
+                if (!nfcSupported) return showNotification('NFC no soportado en este dispositivo', 'error');
+                try {
+                    const ndef = new NDEFReader();
+                    await ndef.scan();
+                    showNotification("Acerca la tarjeta RFID/NFC para vincularla...", "success");
+                    ndef.onreading = event => {
+                        setUserForm(prev => ({ ...prev, nfcId: event.serialNumber }));
+                        showNotification('¡Tarjeta vinculada con éxito!', 'success');
+                    };
+                } catch (error) { showNotification("Error leyendo NFC.", "error"); }
+            };
+
             const handlePhotoChange = (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    if (file.size > 1000000) {
-                        showNotification('La imagen es muy grande (Máx 1MB)', 'error');
-                        return;
-                    }
+                    if (file.size > 1000000) return showNotification('La imagen es muy grande (Máx 1MB)', 'error');
                     const reader = new FileReader();
                     reader.onloadend = () => setUserForm(prev => ({ ...prev, photo: reader.result }));
                     reader.readAsDataURL(file);
                 }
             };
 
-            // --- CONFIGURACIÓN DE LA NUBE ---
-            const saveCloudConfig = () => {
-                try {
-                    let cleanString = configInput;
-                    if (cleanString.includes('const firebaseConfig')) {
-                        const match = cleanString.match(/\{[\s\S]*\}/);
-                        if (match) cleanString = match[0];
-                    }
-                    cleanString = cleanString.replace(/;/g, '').trim();
-
-                    const parsed = new Function('return ' + cleanString)();
-
-                    if (!parsed.apiKey || !parsed.projectId) {
-                        showNotification('Faltan datos en la configuración (apiKey o projectId).', 'error');
-                        return;
-                    }
-
-                    localStorage.setItem('custom_firebase_config', JSON.stringify(parsed));
-                    showNotification('Nube conectada exitosamente. Recargando...', 'success');
-                    setTimeout(() => window.location.reload(), 1500);
-                } catch (err) {
-                    showNotification('Error: Verifica que hayas pegado el código correctamente.', 'error');
-                }
-            };
-
-            const disconnectCloud = () => {
-                if (confirm('¿Seguro que deseas desconectar la nube? La app volverá al modo local (offline).')) {
-                    localStorage.removeItem('custom_firebase_config');
-                    window.location.reload();
-                }
-            };
-
-            // --- ACCIONES (Guardan en DB si está activa, si no en Memoria Local) ---
+            // --- ACCIONES (Guardar/Eliminar) ---
             const handleAddUser = async (e) => {
                 e.preventDefault();
-                if (!userForm.fullName || !userForm.idNumber) {
-                    showNotification('El nombre y la identificación son obligatorios', 'error');
-                    return;
-                }
+                if (!userForm.fullName || !userForm.idNumber) return showNotification('El nombre y la identificación son obligatorios', 'error');
                 const id = generateId();
                 const newUser = { ...userForm, id };
                 
-                if (isOnline && db) {
-                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', id), newUser);
-                } else {
-                    setUsers(prev => [...prev, newUser]);
-                }
+                if (isOnline && db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', id), newUser);
+                else setUsers(prev => [...prev, newUser]);
                 
-                setUserForm({ fullName: '', age: '', idNumber: '', address: '', phone: '', email: '', photo: null });
+                setUserForm({ fullName: '', age: '', idNumber: '', address: '', phone: '', email: '', photo: null, nfcId: '' });
                 const photoInput = document.getElementById('photoInput');
                 if (photoInput) photoInput.value = '';
                 showNotification('Usuario registrado exitosamente');
             };
 
             const handleDeleteUser = async (id) => {
-                if (confirm('¿Seguro que deseas eliminar este usuario?')) {
-                    if (isOnline && db) {
-                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', id));
-                    } else {
-                        setUsers(prev => prev.filter(u => u.id !== id));
-                    }
+                if (window.confirm('¿Seguro que deseas eliminar este usuario?')) {
+                    if (isOnline && db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', id));
+                    else setUsers(prev => prev.filter(u => u.id !== id));
                     showNotification('Usuario eliminado');
                 }
             };
 
             const handleAddActivity = async (e) => {
                 e.preventDefault();
-                if (!activityForm.name || !activityForm.date) {
-                    showNotification('El nombre y la fecha son obligatorios', 'error');
-                    return;
-                }
+                if (!activityForm.name || !activityForm.date) return showNotification('Faltan datos', 'error');
                 const id = generateId();
-                const newActivity = { ...activityForm, id };
-                
-                if (isOnline && db) {
-                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activities', id), newActivity);
-                } else {
-                    setActivities(prev => [...prev, newActivity]);
-                }
+                if (isOnline && db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activities', id), { ...activityForm, id });
+                else setActivities(prev => [...prev, { ...activityForm, id }]);
                 setActivityForm({ name: '', date: '' });
-                showNotification('Actividad programada');
+                showNotification('Actividad creada');
             };
 
             const toggleAttendance = async (activityId, userId) => {
                 const currentStatus = attendance[activityId]?.[userId] || false;
-                
                 if (isOnline && db) {
-                    await setDoc(
-                        doc(db, 'artifacts', appId, 'public', 'data', 'attendance', activityId),
-                        { [userId]: !currentStatus },
-                        { merge: true }
-                    );
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendance', activityId), { [userId]: !currentStatus }, { merge: true });
                 } else {
-                    setAttendance(prev => ({
-                        ...prev,
-                        [activityId]: { ...(prev[activityId] || {}), [userId]: !currentStatus }
-                    }));
+                    setAttendance(prev => ({ ...prev, [activityId]: { ...(prev[activityId] || {}), [userId]: !currentStatus } }));
                 }
             };
 
             const markAll = async (activityId, status) => {
                 const newStatus = {};
                 users.forEach(u => { newStatus[u.id] = status; });
-                
-                if (isOnline && db) {
-                    await setDoc(
-                        doc(db, 'artifacts', appId, 'public', 'data', 'attendance', activityId),
-                        newStatus,
-                        { merge: true }
-                    );
-                } else {
-                    setAttendance(prev => ({ ...prev, [activityId]: newStatus }));
-                }
+                if (isOnline && db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'attendance', activityId), newStatus, { merge: true });
+                else setAttendance(prev => ({ ...prev, [activityId]: newStatus }));
             };
 
             // --- VISTAS ---
@@ -299,122 +345,69 @@
                 );
             };
 
-            const renderCloudTab = () => (
-                <div className="space-y-6 pb-20">
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-                        <div className="flex items-center space-x-2 mb-4">
-                            <IconCloud size={28} className={isOnline ? "text-blue-600" : "text-slate-400"} />
-                            <h2 className="text-xl font-bold text-slate-800">Sincronización en la Nube</h2>
-                        </div>
-                        
-                        {isOnline ? (
-                            <div className="bg-green-50 border border-green-200 p-4 rounded-lg text-green-800 mb-6 flex flex-col items-center">
-                                <IconCheckCircle size={32} className="mb-2 text-green-600" />
-                                <h3 className="font-bold text-lg">¡Conectado exitosamente!</h3>
-                                <p className="text-sm text-center mt-1">Todos los cambios que hagas ahora se guardarán en tu base de datos y se actualizarán en tiempo real para todos tus usuarios.</p>
+            const renderQrModal = () => {
+                if (!qrModalUser) return null;
+                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${qrModalUser.id}`;
+                return (
+                    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl p-6 flex flex-col items-center max-w-sm w-full">
+                            <h3 className="font-bold text-lg text-slate-800 mb-2">Código QR</h3>
+                            <p className="text-slate-500 mb-4">{qrModalUser.fullName}</p>
+                            <div className="bg-slate-100 p-4 rounded-lg mb-4 shadow-inner">
+                                <img src={qrUrl} alt={`QR de ${qrModalUser.fullName}`} className="w-48 h-48" />
                             </div>
-                        ) : (
-                            <>
-                                <p className="text-sm text-slate-600 mb-4">
-                                    Para que tu equipo pueda tomar asistencia al mismo tiempo, conecta esta app a una base de datos gratuita.
-                                </p>
-
-                                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6 text-sm text-blue-800">
-                                    <h3 className="font-bold mb-2">Instrucciones de conexión:</h3>
-                                    <ol className="list-decimal pl-5 space-y-2">
-                                        <li>Ve a <a href="https://console.firebase.google.com/" target="_blank" className="font-bold underline">Firebase Console</a> (con tu cuenta de Google) y crea un proyecto.</li>
-                                        <li>Haz clic en el icono circular <b>&lt;/&gt;</b> (Web) para registrar una app. Ponle cualquier nombre.</li>
-                                        <li>Copia el bloque de código que dice <code>firebaseConfig = {"{ ... }"}</code>.</li>
-                                        <li>En el menú de Firebase, ve a <b>Firestore Database</b> y presiona "Crear base de datos" (elige <b>Modo de prueba</b>).</li>
-                                        <li>En el menú, ve a <b>Authentication</b> > "Sign-in method" y habilita el método <b>Anónimo</b>.</li>
-                                        <li>Pega tu configuración copiada en la caja de abajo.</li>
-                                    </ol>
-                                </div>
-                            </>
-                        )}
-
-                        <label className="block text-sm font-medium text-slate-600 mb-2">
-                            Pegar configuración <b>firebaseConfig</b>:
-                        </label>
-                        <textarea
-                            className="w-full p-3 border border-slate-200 rounded-lg outline-none font-mono text-xs focus:ring-2 focus:ring-blue-500 h-40 bg-slate-50"
-                            placeholder='{&#10;  "apiKey": "AIzaSy...",&#10;  "authDomain": "tu-app.firebaseapp.com",&#10;  "projectId": "tu-app",&#10;  "storageBucket": "tu-app.appspot.com",&#10;  "messagingSenderId": "123456789",&#10;  "appId": "1:123456789:web:abcdef"&#10;}'
-                            value={configInput}
-                            onChange={e => setConfigInput(e.target.value)}
-                        ></textarea>
-
-                        <div className="flex gap-4 mt-4">
-                            <button onClick={saveCloudConfig} className="flex-1 bg-blue-600 text-white p-3 rounded-lg font-semibold flex justify-center items-center space-x-2 hover:bg-blue-700">
-                                <IconCloud size={20} /> <span>{isOnline ? 'Actualizar Nube' : 'Conectar a la Nube'}</span>
-                            </button>
-                            {isOnline && (
-                                <button onClick={disconnectCloud} className="flex-1 bg-red-100 text-red-700 p-3 rounded-lg font-semibold flex justify-center items-center space-x-2 hover:bg-red-200">
-                                    <span>Desconectar</span>
-                                </button>
-                            )}
+                            <p className="text-xs text-slate-400 text-center mb-6">Muestra este código a la cámara para registrar tu asistencia rápidamente.</p>
+                            <button onClick={() => setQrModalUser(null)} className="w-full bg-slate-200 text-slate-800 p-3 rounded-lg font-bold hover:bg-slate-300">Cerrar</button>
                         </div>
                     </div>
-                </div>
-            );
+                );
+            };
 
             const renderUsersTab = () => (
                 <div className="space-y-6 pb-20">
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
                         <h2 className="text-xl font-bold text-slate-800 mb-4">Registrar Usuario</h2>
                         <form onSubmit={handleAddUser} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-600 mb-1">Nombre Completo *</label>
-                                <input type="text" value={userForm.fullName} onChange={e => setUserForm({...userForm, fullName: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej. Juan Pérez" />
-                            </div>
+                            <div><label className="block text-sm font-medium text-slate-600 mb-1">Nombre Completo *</label><input type="text" value={userForm.fullName} onChange={e => setUserForm({...userForm, fullName: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej. Juan Pérez" /></div>
                             <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-600 mb-1">Edad</label>
-                                    <input type="number" value={userForm.age} onChange={e => setUserForm({...userForm, age: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej. 25" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-600 mb-1">Identificación *</label>
-                                    <input type="text" value={userForm.idNumber} onChange={e => setUserForm({...userForm, idNumber: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="DPI / Cédula" />
-                                </div>
+                                <div><label className="block text-sm font-medium text-slate-600 mb-1">Edad</label><input type="number" value={userForm.age} onChange={e => setUserForm({...userForm, age: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej. 25" /></div>
+                                <div><label className="block text-sm font-medium text-slate-600 mb-1">Identificación *</label><input type="text" value={userForm.idNumber} onChange={e => setUserForm({...userForm, idNumber: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="DPI / Cédula" /></div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-600 mb-1">Dirección</label>
-                                <textarea value={userForm.address} onChange={e => setUserForm({...userForm, address: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" rows="2"></textarea>
+                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                <label className="block text-sm font-medium text-slate-600 mb-1">Tarjeta RFID / NFC (Opcional)</label>
+                                <div className="flex space-x-2">
+                                    <input type="text" value={userForm.nfcId} onChange={e => setUserForm({...userForm, nfcId: e.target.value})} className="flex-1 p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-white" placeholder="ID de la Tarjeta" />
+                                    {nfcSupported && <button onClick={readNfcForForm} className="bg-blue-100 text-blue-700 px-4 rounded-lg font-semibold flex items-center shadow-sm hover:bg-blue-200"><IconNfc size={18} className="mr-1" /> Leer</button>}
+                                </div>
+                                {!nfcSupported && <p className="text-xs text-slate-400 mt-1">Tu navegador no soporta lectura NFC directa.</p>}
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-600 mb-1">Teléfono</label>
-                                    <input type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej. 5555-5555" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-600 mb-1">Correo Electrónico</label>
-                                    <input type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                                </div>
+                                <div><label className="block text-sm font-medium text-slate-600 mb-1">Teléfono</label><input type="tel" value={userForm.phone} onChange={e => setUserForm({...userForm, phone: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej. 5555-5555" /></div>
+                                <div><label className="block text-sm font-medium text-slate-600 mb-1">Correo Electrónico</label><input type="email" value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" /></div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-600 mb-1">Foto (Opcional - Máx 1MB)</label>
-                                <input type="file" accept="image/*" onChange={handlePhotoChange} id="photoInput" className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-slate-50 outline-none" />
-                            </div>
-                            <button type="submit" className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold flex justify-center items-center space-x-2">
-                                <IconPlus size={20} /> <span>Guardar Usuario</span>
-                            </button>
+                            <button type="submit" className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold flex justify-center items-center space-x-2 hover:bg-blue-700"><IconPlus size={20} /> <span>Guardar Usuario</span></button>
                         </form>
                     </div>
 
                     <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-                        <div className="p-4 bg-slate-50 border-b border-slate-100">
-                            <h3 className="font-bold text-slate-700">Usuarios en Sistema ({users.length})</h3>
-                        </div>
+                        <div className="p-4 bg-slate-50 border-b border-slate-100"><h3 className="font-bold text-slate-700">Usuarios ({users.length})</h3></div>
                         <div className="divide-y divide-slate-100">
-                            {users.length === 0 ? <p className="p-6 text-center text-slate-400">No hay usuarios registrados aún.</p> : users.map(user => (
-                                <div key={user.id} className="p-4 flex justify-between items-center">
-                                    <div className="flex items-center space-x-4">
-                                        {user.photo ? <img src={user.photo} className="w-12 h-12 rounded-full object-cover border border-slate-200" /> : <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-slate-500"><IconUser size={24} /></div>}
+                            {users.length === 0 ? <p className="p-6 text-center text-slate-400">No hay usuarios.</p> : users.map(user => (
+                                <div key={user.id} className="p-4 flex justify-between items-center hover:bg-slate-50">
+                                    <div className="flex items-center space-x-3">
+                                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600"><IconUser size={20} /></div>
                                         <div>
                                             <p className="font-semibold text-slate-800">{user.fullName}</p>
-                                            <p className="text-sm text-slate-500">ID: {user.idNumber} | Tel: {user.phone || 'N/A'}</p>
+                                            <div className="flex items-center space-x-2 mt-0.5">
+                                                <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">ID: {user.idNumber}</span>
+                                                {user.nfcId && <span className="text-xs text-purple-600 bg-purple-100 px-2 py-0.5 rounded flex items-center"><IconNfc size={10} className="mr-1"/> NFC</span>}
+                                            </div>
                                         </div>
                                     </div>
-                                    <button onClick={() => handleDeleteUser(user.id)} className="text-red-400 p-2 hover:text-red-600 transition-colors"><IconTrash2 size={20} /></button>
+                                    <div className="flex items-center space-x-1">
+                                        <button onClick={() => setQrModalUser(user)} className="text-slate-400 hover:text-blue-600 p-2 bg-slate-50 hover:bg-blue-50 rounded-lg" title="Ver QR"><IconQrCode size={20} /></button>
+                                        <button onClick={() => handleDeleteUser(user.id)} className="text-red-400 p-2 hover:bg-red-50 rounded-lg"><IconTrash2 size={20} /></button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -427,26 +420,15 @@
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
                         <h2 className="text-xl font-bold text-slate-800 mb-4">Programar Actividad</h2>
                         <form onSubmit={handleAddActivity} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-600 mb-1">Nombre *</label>
-                                <input type="text" value={activityForm.name} onChange={e => setActivityForm({...activityForm, name: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-600 mb-1">Fecha *</label>
-                                <input type="date" value={activityForm.date} onChange={e => setActivityForm({...activityForm, date: e.target.value})} className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                            </div>
-                            <button type="submit" className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold flex justify-center items-center space-x-2">
-                                <IconPlus size={20} /> <span>Crear Actividad</span>
-                            </button>
+                            <div><label className="block text-sm mb-1">Nombre *</label><input type="text" value={activityForm.name} onChange={e => setActivityForm({...activityForm, name: e.target.value})} className="w-full p-3 border rounded-lg" /></div>
+                            <div><label className="block text-sm mb-1">Fecha *</label><input type="date" value={activityForm.date} onChange={e => setActivityForm({...activityForm, date: e.target.value})} className="w-full p-3 border rounded-lg" /></div>
+                            <button type="submit" className="w-full bg-blue-600 text-white p-3 rounded-lg font-bold">Crear Actividad</button>
                         </form>
                     </div>
-                    
                     <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-                        <div className="p-4 bg-slate-50 border-b border-slate-100"><h3 className="font-bold text-slate-700">Actividades ({activities.length})</h3></div>
-                        <div className="divide-y divide-slate-100">
-                            {activities.length === 0 ? <p className="p-6 text-center text-slate-400">No hay actividades.</p> : activities.map(act => (
-                                <div key={act.id} className="p-4"><p className="font-semibold text-slate-800">{act.name}</p><p className="text-sm text-slate-500">{act.date}</p></div>
-                            ))}
+                        <div className="p-4 bg-slate-50 border-b border-slate-100"><h3 className="font-bold">Actividades ({activities.length})</h3></div>
+                        <div className="divide-y">
+                            {activities.map(act => <div key={act.id} className="p-4"><p className="font-bold">{act.name}</p><p className="text-sm text-slate-500">{act.date}</p></div>)}
                         </div>
                     </div>
                 </div>
@@ -456,37 +438,49 @@
                 <div className="space-y-6 pb-20">
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
                         <h2 className="text-xl font-bold text-slate-800 mb-4">Tomar Asistencia</h2>
-                        <select value={selectedActivityForAttendance} onChange={e => setSelectedActivityForAttendance(e.target.value)} className="w-full p-3 border border-slate-200 rounded-lg outline-none bg-white focus:ring-2 focus:ring-blue-500">
-                            <option value="">-- Selecciona una actividad --</option>
+                        <select value={selectedActivityForAttendance} onChange={e => setSelectedActivityForAttendance(e.target.value)} className="w-full p-3 border border-slate-200 rounded-lg outline-none bg-white focus:ring-2 focus:ring-blue-500 mb-4">
+                            <option value="">-- Selecciona la actividad primero --</option>
                             {activities.map(act => <option key={act.id} value={act.id}>{act.name} ({act.date})</option>)}
                         </select>
-                        <p className="text-xs text-slate-400 mt-2 flex items-center">
-                            {isOnline ? <><IconCheckCircle size={14} className="mr-1 text-green-500"/> Sincronizado en la nube</> : <><IconAlertCircle size={14} className="mr-1 text-yellow-500"/> Guardando localmente</>}
-                        </p>
+
+                        {selectedActivityForAttendance && (
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
+                                {!scannerActive ? (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button onClick={() => setScannerActive(true)} className="flex flex-col items-center justify-center bg-white p-4 rounded-lg shadow-sm border border-slate-200 text-blue-600 hover:bg-blue-50">
+                                            <IconQrCode size={32} className="mb-2" />
+                                            <span className="font-semibold text-sm">Cámara QR</span>
+                                        </button>
+                                        <button onClick={startNfcScanner} className={`flex flex-col items-center justify-center bg-white p-4 rounded-lg shadow-sm border border-slate-200 ${nfcSupported ? 'text-purple-600 hover:bg-purple-50' : 'text-slate-300'}`} disabled={!nfcSupported}>
+                                            <IconNfc size={32} className="mb-2" />
+                                            <span className="font-semibold text-sm">Lector NFC</span>
+                                            {!nfcSupported && <span className="text-[10px] text-slate-400 mt-1">No disponible</span>}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center">
+                                        <div className="w-full bg-black rounded-xl overflow-hidden mb-4 relative shadow-inner">
+                                            <div id="qr-reader"></div>
+                                        </div>
+                                        <button onClick={() => setScannerActive(false)} className="bg-red-100 text-red-700 px-6 py-2 rounded-full font-bold shadow-sm">Detener Cámara</button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     {selectedActivityForAttendance && users.length > 0 && (
                         <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-4">
-                                <h3 className="font-bold text-slate-700">Lista de Usuarios</h3>
-                                <div className="flex space-x-2 w-full sm:w-auto">
-                                    <button onClick={() => markAll(selectedActivityForAttendance, true)} className="flex-1 text-xs bg-green-100 text-green-700 px-3 py-2 rounded-lg font-semibold">Marcar Todos</button>
-                                    <button onClick={() => markAll(selectedActivityForAttendance, false)} className="flex-1 text-xs bg-red-100 text-red-700 px-3 py-2 rounded-lg font-semibold">Desmarcar Todos</button>
-                                </div>
+                            <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                                <h3 className="font-bold text-slate-700">Lista Manual</h3>
                             </div>
                             <div className="divide-y divide-slate-100">
                                 {users.map(user => {
                                     const isPresent = attendance[selectedActivityForAttendance]?.[user.id] || false;
                                     return (
-                                        <div key={user.id} className="p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => toggleAttendance(selectedActivityForAttendance, user.id)}>
-                                            <div className="flex items-center space-x-3">
-                                                {user.photo ? <img src={user.photo} className="w-10 h-10 rounded-full object-cover" /> : <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500"><IconUser size={20} /></div>}
-                                                <div><p className="font-semibold text-slate-800">{user.fullName}</p><p className="text-sm text-slate-500">{user.idNumber}</p></div>
-                                            </div>
-                                            <div>
-                                                {isPresent ? <div className="flex items-center text-green-600 bg-green-50 px-3 py-1 rounded-full border border-green-200 shadow-sm"><IconCheckCircle size={20} className="mr-1" /><span className="text-sm font-semibold">Presente</span></div> 
-                                                : <div className="flex items-center text-slate-500 bg-white px-3 py-1 rounded-full border border-slate-300 shadow-sm"><IconXCircle size={20} className="mr-1" /><span className="text-sm font-semibold">Ausente</span></div>}
-                                            </div>
+                                        <div key={user.id} className="p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={() => toggleAttendance(selectedActivityForAttendance, user.id)}>
+                                            <div><p className="font-semibold">{user.fullName}</p><p className="text-xs text-slate-500">{user.idNumber}</p></div>
+                                            <div>{isPresent ? <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">Presente</span> : <span className="bg-slate-100 text-slate-500 px-3 py-1 rounded-full text-xs font-bold">Ausente</span>}</div>
                                         </div>
                                     );
                                 })}
@@ -505,7 +499,7 @@
                     <div className="space-y-6 pb-20">
                         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
                             <h2 className="text-xl font-bold text-slate-800 mb-4">Reporte Global</h2>
-                            <select value={selectedActivityForReport} onChange={e => setSelectedActivityForReport(e.target.value)} className="w-full p-3 border border-slate-200 rounded-lg outline-none bg-white focus:ring-2 focus:ring-blue-500">
+                            <select value={selectedActivityForReport} onChange={e => setSelectedActivityForReport(e.target.value)} className="w-full p-3 border rounded-lg bg-white mb-4">
                                 <option value="">-- Selecciona una actividad --</option>
                                 {activities.map(a => <option key={a.id} value={a.id}>{a.name} ({a.date})</option>)}
                             </select>
@@ -513,19 +507,18 @@
                         {act && (
                             <>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className="bg-green-50 p-4 rounded-xl text-center border border-green-100 shadow-sm"><p className="text-sm text-green-600 font-semibold">Presentes</p><p className="text-3xl font-bold text-green-700">{presentCount}</p></div>
-                                    <div className="bg-red-50 p-4 rounded-xl text-center border border-red-100 shadow-sm"><p className="text-sm text-red-600 font-semibold">Ausentes</p><p className="text-3xl font-bold text-red-700">{absentCount}</p></div>
+                                    <div className="bg-green-50 p-4 rounded-xl text-center"><p className="text-green-600 font-bold">Presentes</p><p className="text-3xl text-green-700 font-bold">{presentCount}</p></div>
+                                    <div className="bg-red-50 p-4 rounded-xl text-center"><p className="text-red-600 font-bold">Ausentes</p><p className="text-3xl text-red-700 font-bold">{absentCount}</p></div>
                                 </div>
-                                <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-                                    <div className="p-4 bg-slate-50 border-b border-slate-100"><h3 className="font-bold text-slate-700">Detalle de Usuarios</h3></div>
-                                    <table className="w-full text-left border-collapse">
-                                        <tbody className="divide-y divide-slate-100">
+                                <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mt-4">
+                                    <table className="w-full text-left">
+                                        <tbody>
                                             {users.map(user => {
                                                 const isPresent = attendance[act.id]?.[user.id] || false;
                                                 return (
-                                                    <tr key={user.id} className="hover:bg-slate-50">
-                                                        <td className="p-3"><p className="font-medium text-slate-800">{user.fullName}</p></td>
-                                                        <td className="p-3"><span className={`px-2 py-1 rounded-full text-xs font-semibold shadow-sm ${isPresent ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-white text-slate-500 border border-slate-300'}`}>{isPresent ? 'Presente' : 'Ausente'}</span></td>
+                                                    <tr key={user.id} className="border-b">
+                                                        <td className="p-4"><p className="font-bold">{user.fullName}</p></td>
+                                                        <td className="p-4 text-right"><span className={`px-3 py-1 rounded-full text-xs font-bold ${isPresent ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>{isPresent ? 'Presente' : 'Ausente'}</span></td>
                                                     </tr>
                                                 );
                                             })}
@@ -541,13 +534,28 @@
             return (
                 <div>
                     {renderNotification()}
-                    <header className="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-10 flex justify-between items-center">
-                        <h1 className="text-xl font-bold flex-1 text-center">Control de Asistencia</h1>
+                    {renderQrModal()}
+                    
+                    <header className="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-10">
+                        <h1 className="text-xl font-bold text-center">Control de Asistencia</h1>
                     </header>
                     
-                    {!isOnline && activeTab !== 'cloud' && (
-                        <div className="bg-yellow-50 text-yellow-700 p-2 text-center text-xs font-medium border-b border-yellow-200 flex items-center justify-center">
-                            <IconAlertCircle size={16} className="mr-1"/> Modo Offline. Toca "Nube" para habilitar el modo en línea.
+                    {/* AVISO PARA SUBIR DATOS LOCALES A LA NUBE */}
+                    {isOnline && hasLocalDataToSync && (
+                        <div className="bg-indigo-50 border-b border-indigo-200 p-3 flex justify-between items-center shadow-sm">
+                            <div className="flex items-center text-indigo-700">
+                                <IconUploadCloud size={20} className="mr-2" />
+                                <span className="text-xs font-medium">Tienes datos locales (Offline) sin subir.</span>
+                            </div>
+                            <button onClick={syncLocalToCloud} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm hover:bg-indigo-700">
+                                Subir ahora
+                            </button>
+                        </div>
+                    )}
+
+                    {!isOnline && (
+                        <div className="bg-yellow-50 text-yellow-700 p-2 text-center text-xs font-medium border-b border-yellow-200 flex justify-center">
+                            <IconAlertCircle size={16} className="mr-1"/> Modo Offline Local (Firebase Config falta en el código)
                         </div>
                     )}
 
@@ -556,15 +564,13 @@
                         {activeTab === 'activities' && renderActivitiesTab()}
                         {activeTab === 'attendance' && renderAttendanceTab()}
                         {activeTab === 'reports' && renderReportsTab()}
-                        {activeTab === 'cloud' && renderCloudTab()}
                     </main>
                     
-                    <nav className="fixed bottom-0 w-full bg-white border-t border-slate-200 flex justify-between items-center px-2 py-1 pb-safe z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
-                        <button onClick={() => setActiveTab('users')} className={`flex flex-col items-center p-2 w-full ${activeTab === 'users' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><IconUsers size={20} /><span className="text-[10px] font-medium mt-1">Usuarios</span></button>
-                        <button onClick={() => setActiveTab('activities')} className={`flex flex-col items-center p-2 w-full ${activeTab === 'activities' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><IconCalendar size={20} /><span className="text-[10px] font-medium mt-1">Eventos</span></button>
-                        <button onClick={() => setActiveTab('attendance')} className={`flex flex-col items-center p-2 w-full ${activeTab === 'attendance' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><IconCheckSquare size={20} /><span className="text-[10px] font-medium mt-1">Asistencia</span></button>
-                        <button onClick={() => setActiveTab('reports')} className={`flex flex-col items-center p-2 w-full ${activeTab === 'reports' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><IconFileText size={20} /><span className="text-[10px] font-medium mt-1">Reportes</span></button>
-                        <button onClick={() => setActiveTab('cloud')} className={`flex flex-col items-center p-2 w-full ${activeTab === 'cloud' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><IconCloud size={20} /><span className="text-[10px] font-medium mt-1">Nube</span></button>
+                    <nav className="fixed bottom-0 w-full bg-white border-t border-slate-200 flex justify-between items-center px-2 py-1 pb-safe z-20">
+                        <button onClick={() => setActiveTab('users')} className={`flex flex-col items-center p-2 w-full ${activeTab === 'users' ? 'text-blue-600' : 'text-slate-400'}`}><IconUsers size={20} /><span className="text-[10px] mt-1">Usuarios</span></button>
+                        <button onClick={() => setActiveTab('activities')} className={`flex flex-col items-center p-2 w-full ${activeTab === 'activities' ? 'text-blue-600' : 'text-slate-400'}`}><IconCalendar size={20} /><span className="text-[10px] mt-1">Eventos</span></button>
+                        <button onClick={() => setActiveTab('attendance')} className={`flex flex-col items-center p-2 w-full ${activeTab === 'attendance' ? 'text-blue-600' : 'text-slate-400'}`}><IconCheckSquare size={20} /><span className="text-[10px] mt-1">Asistencia</span></button>
+                        <button onClick={() => setActiveTab('reports')} className={`flex flex-col items-center p-2 w-full ${activeTab === 'reports' ? 'text-blue-600' : 'text-slate-400'}`}><IconFileText size={20} /><span className="text-[10px] mt-1">Reportes</span></button>
                     </nav>
                 </div>
             );
